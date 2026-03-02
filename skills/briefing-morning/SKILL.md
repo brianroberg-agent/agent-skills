@@ -12,9 +12,11 @@ information from multiple specialist agents.
 
 ## Prerequisites
 
-Requires both environment variables:
+Requires environment variables:
 - `EMAIL_AGENT_URL` - Email agent server
 - `CALENDAR_AGENT_URL` - Calendar agent server
+
+GTD and Donor Management credentials in `/workspace/TOOLS.md`.
 
 ## Usage
 
@@ -50,12 +52,44 @@ curl -s -X POST "$EMAIL_AGENT_URL/summarize" \
     | jq -r '.answer'
 ```
 
-### Step 3: Synthesize
+### Step 3: GTD Status Check
 
-After getting both responses, synthesize them into a coherent briefing that:
+```bash
+# Inbox count
+curl -s "https://gtd-api.fly.dev/review/inbox-count" \
+    -H "X-API-Key: $GTD_API_KEY" | jq .
+
+# Overdue items
+curl -s "https://gtd-api.fly.dev/review/overdue" \
+    -H "X-API-Key: $GTD_API_KEY" | jq .
+
+# Tickler items surfacing today
+curl -s "https://gtd-api.fly.dev/tickler/today" \
+    -H "X-API-Key: $GTD_API_KEY" | jq .
+
+# Deadlines today
+curl -s "https://gtd-api.fly.dev/review/upcoming-deadlines?days=1" \
+    -H "X-API-Key: $GTD_API_KEY" | jq .
+```
+
+### Step 4: Donor Task Check
+
+```bash
+# Pending donor tasks (via GTD API)
+curl -s "https://gtd-api.fly.dev/donor-tasks?status=next_action" \
+    -H "X-API-Key: $GTD_API_KEY" | jq .
+```
+
+### Step 5: Synthesize
+
+After getting all responses, synthesize them into a coherent briefing that:
 - Highlights priorities for the day
 - Notes any conflicts between meetings and email deadlines
 - Suggests time blocks for email responses
+- Reports GTD inbox count and any overdue items
+- Surfaces today's tickler items and deadlines
+- Lists pending donor follow-ups (thank-you calls, etc.)
+- Provides a priority ranking across all four domains (calendar, email, GTD, donor)
 
 ## Follow-up Suggestions
 
@@ -63,3 +97,6 @@ After presenting the briefing, the user might ask:
 - "Based on that briefing, what should I prioritize today?"
 - "Are there any conflicts between my meetings and email deadlines?"
 - "Summarize my day in one paragraph"
+- "Process my inbox" (→ use `gtd-process-inbox` skill)
+- "Show me those donor tasks" (→ use `gtd-donor-tasks` skill)
+- "What's overdue?" (→ use `gtd-review-actions` skill)
