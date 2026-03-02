@@ -19,6 +19,7 @@ This plugin follows a multi-agent architecture where Claude Code acts as an orch
 | `/email-label` | Apply labels to emails | Write (requires approval) |
 | `/email-archive` | Archive emails | Write (requires approval) |
 | `/email-mark-read` | Mark emails as read | Write (requires approval) |
+| `/email-draft` | Create, view, update, or delete email drafts | Write (requires approval) |
 | `/email-triage` | Triage unread emails with bulk actions | Write (requires approval) |
 
 ### Calendar Skills
@@ -148,6 +149,7 @@ agent-skills/
 │   ├── calendar-weekly-briefing/
 │   ├── email-archive/
 │   ├── email-ask/                # Email queries
+│   ├── email-draft/              # Email draft management
 │   ├── email-label/
 │   ├── email-mark-read/
 │   ├── email-triage/
