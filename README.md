@@ -1,6 +1,6 @@
 # Agent Skills
 
-A Claude Code plugin providing skills for interacting with email agents, calendar agents, and a GTD task management API. These skills enable Claude Code to search emails, manage calendar events, process GTD inboxes, and orchestrate multi-agent workflows.
+A Claude Code plugin providing skills for interacting with email agents, calendar agents, a GTD task management API, and a donor management system. These skills enable Claude Code to search emails, manage calendar events, process GTD inboxes, manage donor relationships, and orchestrate multi-agent workflows.
 
 ## Overview
 
@@ -8,7 +8,8 @@ This plugin follows a multi-agent architecture where Claude Code acts as an orch
 
 - **Email Agent** - Handles Gmail operations (search, summarize, label, archive)
 - **Calendar Agent** - Handles Google Calendar operations (query, check availability, create events)
-- **GTD API** - Handles Getting Things Done task management (inbox, next actions, projects, someday/maybe, tickler)
+- **GTD API** - Handles Getting Things Done task management (inbox, next actions, projects, areas, tags, someday/maybe, tickler)
+- **Donor Management API** - Handles donor/contact management, giving history, interaction logging, pledges, and DonorHub sync
 
 ## Features
 
@@ -39,15 +40,32 @@ This plugin follows a multi-agent architecture where Claude Code acts as an orch
 ### GTD Skills
 | Skill | Description | Access |
 |-------|-------------|--------|
-| `/gtd-capture` | Capture tasks to GTD inbox with clarification | Write |
+| `/gtd-capture` | Capture tasks to GTD inbox with clarification and tagging | Write |
 | `/gtd-process-inbox` | Process inbox items into next actions, someday/maybe, tickler | Write |
-| `/gtd-complete` | Mark tasks complete across any GTD list | Write |
+| `/gtd-complete` | Mark tasks complete across any GTD list or donor tasks | Write |
+| `/gtd-weekly-review` | Orchestrate the full GTD weekly review ceremony | Read/Write |
+| `/gtd-projects` | Project lifecycle management (CRUD, hold, activate, actions) | Read/Write |
+| `/gtd-review-actions` | Query and filter next actions by context, energy, time, deadline | Read/Write |
+| `/gtd-someday-maybe` | Manage someday/maybe list (activate, complete, review) | Read/Write |
+| `/gtd-tickler` | Manage tickler/deferred items with date-based surfacing | Read/Write |
+| `/gtd-organize` | Manage areas of responsibility and context tags | Read/Write |
+| `/gtd-donor-tasks` | Cross-system donor task management from GTD perspective | Read/Write |
+
+### Donor Management Skills
+| Skill | Description | Access |
+|-------|-------------|--------|
+| `/donor-ask` | Look up donors, contacts, giving stats, and activity | Read-only |
+| `/donor-log` | Log calls, visits, letters, and other interactions | Write |
+| `/donor-gifts` | Query giving data and record manual gifts | Read/Write |
+| `/donor-tasks` | Manage donor stewardship tasks (thank-you, follow-up) | Read/Write |
+| `/donor-sync` | Trigger DonorHub sync, manage pledges, export mailing lists | Read/Write |
+| `/donor-contact-manage` | Create, update, delete contacts and manage groups | Write |
 
 ### Utility Skills
 | Skill | Description |
 |-------|-------------|
-| `/morning-briefing` | Combined calendar + email briefing (multi-agent orchestration) |
-| `/agent-status` | Health check for agent servers |
+| `/briefing-morning` | Combined calendar + email + GTD + donor briefing (multi-agent orchestration) |
+| `/agent-status` | Health check for all agent servers and APIs |
 
 ## Prerequisites
 
@@ -55,6 +73,7 @@ This plugin follows a multi-agent architecture where Claude Code acts as an orch
 - Email agent server running (for email skills)
 - Calendar agent server running (for calendar skills)
 - GTD API accessible (for GTD skills) — endpoint and key configured in `/workspace/TOOLS.md`
+- Donor Management API accessible (for donor skills) — endpoint and key configured in `/workspace/TOOLS.md`
 
 ## Installation
 
@@ -95,6 +114,8 @@ Set these environment variables to point to your agent servers:
 
 GTD skills read their API endpoint and key from `/workspace/TOOLS.md`. The full API spec is at https://gtd-api.fly.dev/openapi.json.
 
+Donor Management skills read their API endpoint and key from `/workspace/TOOLS.md`. Auth uses `X-API-Key` header with agent-level keys (`agent_read` or `agent_readwrite`). Base URL: `https://donor-management.fly.dev`.
+
 ## Usage
 
 Once installed, invoke skills in Claude Code using slash commands:
@@ -107,9 +128,37 @@ Once installed, invoke skills in Claude Code using slash commands:
 /gtd-capture Email Doug about the budget meeting
 /gtd-process-inbox
 /gtd-complete Mark "email Doug" done
+/gtd-weekly-review
+/gtd-projects Show my active projects
+/donor-ask Tell me about John Smith
+/donor-log I just called John about his pledge renewal
+/donor-gifts How much has John given this year?
 ```
 
 Or describe what you want naturally and Claude Code will select the appropriate skill.
+
+## Testing
+
+The project includes a test suite that validates skill files structurally and checks API endpoint coverage.
+
+```bash
+# Install dependencies
+uv sync
+
+# Run structural tests (no network required)
+uv run pytest tests/test_skills.py -v
+
+# Run API coverage tests (no network required)
+uv run pytest tests/test_api_coverage.py -v
+
+# Run OpenAPI sync tests (requires network access)
+uv run pytest tests/test_openapi_sync.py -m network -v
+
+# Run all non-network tests
+uv run pytest tests/ -v
+```
+
+The API coverage tests ensure every endpoint in the GTD API and Donor Management API is referenced by at least one skill, preventing future documentation drift.
 
 ## Updating
 
@@ -135,10 +184,10 @@ agent-skills/
 ├── .claude-plugin/
 │   └── plugin.json               # Plugin manifest
 ├── skills/
-│   ├── agent-status/             # Health check skill
-│   ├── briefing-morning/         # Combined calendar + email briefing
+│   ├── agent-status/             # Health check for all services
+│   ├── briefing-morning/         # Combined 4-domain morning briefing
 │   ├── calendar-analyze-schedule/
-│   ├── calendar-ask/             # Calendar queries
+│   ├── calendar-ask/
 │   ├── calendar-check-availability/
 │   ├── calendar-create-event/
 │   ├── calendar-daily-briefing/
@@ -147,15 +196,35 @@ agent-skills/
 │   ├── calendar-summarize-event/
 │   ├── calendar-update-event/
 │   ├── calendar-weekly-briefing/
+│   ├── donor-ask/                # Query donors and contacts
+│   ├── donor-contact-manage/     # Contact CRUD and group management
+│   ├── donor-gifts/              # Giving data and manual gift entry
+│   ├── donor-log/                # Log interactions with donors
+│   ├── donor-sync/               # DonorHub sync and pledge management
+│   ├── donor-tasks/              # Donor stewardship tasks
 │   ├── email-archive/
-│   ├── email-ask/                # Email queries
-│   ├── email-draft/              # Email draft management
+│   ├── email-ask/
+│   ├── email-draft/
 │   ├── email-label/
 │   ├── email-mark-read/
 │   ├── email-triage/
-│   ├── gtd-capture/              # Capture tasks to GTD inbox
-│   ├── gtd-complete/             # Mark GTD tasks complete
-│   └── gtd-process-inbox/        # Process inbox → next actions/someday/tickler
+│   ├── gtd-capture/              # Capture to GTD inbox with tags
+│   ├── gtd-complete/             # Complete tasks (GTD + donor)
+│   ├── gtd-donor-tasks/          # Cross-system donor tasks in GTD
+│   ├── gtd-organize/             # Areas of responsibility + tags
+│   ├── gtd-process-inbox/        # Process inbox → destinations
+│   ├── gtd-projects/             # Project lifecycle management
+│   ├── gtd-review-actions/       # Filtered next action queries
+│   ├── gtd-someday-maybe/        # Someday/maybe management
+│   ├── gtd-tickler/              # Tickler/deferred items
+│   └── gtd-weekly-review/        # Full GTD weekly review
+├── tests/
+│   ├── conftest.py               # Shared test fixtures
+│   ├── api_specs.py              # API endpoint registry
+│   ├── test_skills.py            # Structural validation tests
+│   ├── test_api_coverage.py      # Endpoint coverage tests
+│   └── test_openapi_sync.py      # Live OpenAPI spec sync tests
+├── pyproject.toml                # Python dependencies (pytest, pyyaml)
 └── README.md
 ```
 
@@ -170,6 +239,7 @@ Each skill directory contains a `SKILL.md` file with:
 - **Approval gates**: Write operations (labeling, archiving, creating events) require explicit user approval in Claude Code
 - **Data locality**: Email and calendar data stays on your local machine; only queries and summaries pass through the API
 - **Prompt injection protection**: Agent servers ignore instructions embedded in email/event content
+- **Agent key isolation**: Donor Management agent keys automatically strip `confidential_notes` from responses and silently drop them on writes
 
 ## Adding New Skills
 
@@ -191,7 +261,12 @@ Each skill directory contains a `SKILL.md` file with:
    Documentation and usage instructions...
    ```
 
-3. Commit and push; run `git pull` on other machines
+3. Run tests to validate:
+   ```bash
+   uv run pytest tests/test_skills.py -v
+   ```
+
+4. Commit and push; run `git pull` on other machines
 
 ## License
 
