@@ -56,17 +56,7 @@ Body: {
 }
 ```
 
-**CRITICAL: area_id is NOT preserved through processing.** The process endpoint moves the item but drops the `area_id`. After processing, you MUST patch each item on its destination list to restore the area:
-
-```
-PATCH /next-actions/{item_id}
-Body: { "area_id": int }
-
-PATCH /someday-maybe/{item_id}
-Body: { "area_id": int }
-```
-
-The recommended approach: process all items first, then batch-update area_ids on the destination lists.
+The `area_id` set on the inbox item is preserved through processing. If the item is linked to a project that has an area, and the item itself has no area set, the area is inherited from the project automatically.
 
 ### 5. Create Projects When Needed
 

@@ -59,10 +59,18 @@ Endpoint and credentials in `/workspace/TOOLS.md`. Full API spec at https://gtd-
 ```
 POST https://gtd-api.fly.dev/inbox
 Header: X-API-Key: [from TOOLS.md]
-Body: { "title": "...", "notes": "...", "area_id": int|null, "project_id": int|null }
+Body: { "title": "...", "notes": "...", "area_id": int|null, "project_id": int|null, "tag_ids": [int] }
 ```
 
-The `area_id` and `project_id` fields are optional. When the area is obvious from context, set it at capture time to save a step during processing.
+The `area_id`, `project_id`, and `tag_ids` fields are optional. When the area is obvious from context, set it at capture time to save a step during processing. If the item has an obvious context (e.g., "call John" → @phone tag), set the tag at capture time.
+
+**List available tags:**
+```
+GET https://gtd-api.fly.dev/tags
+Header: X-API-Key: [from TOOLS.md]
+```
+
+Common context tags: `@home`, `@phone`, `@computer`, `@errands`, `@waiting_for`.
 
 **Areas of responsibility:**
 ```

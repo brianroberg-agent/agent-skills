@@ -42,16 +42,42 @@ else
 fi
 ```
 
+### Check GTD API
+
+```bash
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://gtd-api.fly.dev/health" 2>/dev/null)
+if [ "$STATUS" = "200" ]; then
+    echo "GTD API (https://gtd-api.fly.dev): OK"
+else
+    echo "GTD API (https://gtd-api.fly.dev): UNREACHABLE (HTTP $STATUS)"
+fi
+```
+
+### Check Donor Management DB
+
+```bash
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://donor-management.fly.dev/health" 2>/dev/null)
+if [ "$STATUS" = "200" ]; then
+    echo "Donor DB (https://donor-management.fly.dev): OK"
+else
+    echo "Donor DB (https://donor-management.fly.dev): UNREACHABLE (HTTP $STATUS)"
+fi
+```
+
 ## Expected Output
 
-When both agents are running:
+When all services are running:
 ```
 Email Agent (http://100.x.x.x:8081): OK
 Calendar Agent (http://localhost:8082): OK
+GTD API (https://gtd-api.fly.dev): OK
+Donor DB (https://donor-management.fly.dev): OK
 ```
 
-When an agent is down:
+When a service is down:
 ```
 Email Agent (http://100.x.x.x:8081): UNREACHABLE (HTTP 000)
 Calendar Agent (http://localhost:8082): OK
+GTD API (https://gtd-api.fly.dev): OK
+Donor DB (https://donor-management.fly.dev): UNREACHABLE (HTTP 503)
 ```

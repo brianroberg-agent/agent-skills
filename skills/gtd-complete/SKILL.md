@@ -37,8 +37,9 @@ Items live on different lists. Match the endpoint to where the item lives:
 - **Next actions** → `POST /next-actions/{id}/complete`
 - **Someday/maybe** → `POST /someday-maybe/{id}/complete`
 - **Tickler items** → `POST /tickler/{id}/complete`
+- **Donor tasks** → `PATCH /donor-tasks/{id}/status` with `{"status": "completed"}`
 
-If you're unsure which list an item is on, check `next-actions` first (most common), then `inbox`.
+If you're unsure which list an item is on, check `next-actions` first (most common), then `inbox`. If the user says "done" about a donor task (thank-you call, follow-up, etc.), use the donor task endpoint — note the different HTTP method (PATCH vs POST) and body format.
 
 ### After Completing
 
@@ -57,7 +58,7 @@ Only use DELETE (`DELETE /{list}/{id}`) when the user explicitly wants to **remo
 
 Endpoint and credentials in `/workspace/TOOLS.md`. Full API spec at https://gtd-api.fly.dev/openapi.json.
 
-**Complete an item:**
+**Complete a GTD item:**
 ```
 POST https://gtd-api.fly.dev/{list}/{item_id}/complete
 Header: X-API-Key: [from TOOLS.md]
@@ -66,6 +67,15 @@ Header: X-API-Key: [from TOOLS.md]
 Where `{list}` is one of: `inbox`, `next-actions`, `someday-maybe`, `tickler`.
 
 Returns the updated item with `completed_at` timestamp set.
+
+**Complete a donor task:**
+```
+PATCH https://gtd-api.fly.dev/donor-tasks/{item_id}/status
+Header: X-API-Key: [from TOOLS.md]
+Body: { "status": "completed" }
+```
+
+Completes the task in GTD and pushes the status back to the Donor Management DB.
 
 **List items (to find IDs):**
 ```
