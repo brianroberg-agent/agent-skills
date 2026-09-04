@@ -38,6 +38,32 @@ When phrases like "I should probably..." or "I've been meaning to..." appear, pu
 
 **Notes:** Any context from clarification—timeline, who's involved, why it matters. Keep brief.
 
+## Voice Capture: Always Store the Raw Transcription
+
+On any voice capture, put the raw transcribed utterance in `notes` — unconditionally,
+even when the title is already a clean summary, never "only when it seems useful". On
+2026-08-23/24, a bike ride with wind noise defeating silence detection (plus a dropped
+transport and listen windows cut to 40s) produced inbox items with a garbled or
+truncated title and an *empty* notes field — one was the single word "Text", another
+"I know about Case USCCom which was that we need to receive" (cuts off mid-clause). By
+the 2026-09-04 weekly review neither meant anything, and both had to be deleted as
+unrecoverable. A garbled raw transcription sitting in notes still gives more to work
+with a week later than a garbled title alone with nothing behind it.
+
+## "Record a Note About X" Is Never a Task
+
+When Brian asks to record a note, capture the note's CONTENT in the same turn and store
+it as the note body. Never create an inbox item whose title is "record a note about …"
+— that defers the information to a later capture that, in practice, doesn't happen: two
+2026-08-23/24 items ("Record a note about understory podcast metaphor"; "Record a note
+about Mike Skaist's comment in the understory podcast") were captured as tasks with no
+notes field at all, and by 2026-09-04 the actual content — what the metaphor was, what
+Skaist said — was gone, not just the to-do to write it down. Brian's own words on 9/4:
+"those came from an attempt to record the note itself along with the task, but clearly
+it didn't work." If he genuinely can't dictate the content right then (e.g. mid-ride),
+that has to be his explicit, stated choice — never a silent default to a task with an
+empty notes field.
+
 ## What NOT to Capture
 
 - Reference material ("remember that the API key is X")
