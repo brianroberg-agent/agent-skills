@@ -26,22 +26,38 @@ Choose the appropriate endpoint based on the user's question:
 
 ## Usage
 
+Every read below captures the HTTP status and checks it before touching the body.
+A read that fails returns a well-formed envelope with an empty payload
+(`{"success": false, "events": [], "error": "..."}`), so without the status a failed
+read is indistinguishable from an empty calendar.
+
 ### List Events (for timeframe queries)
 
 ```bash
-curl -s "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=START_ISO&time_max=END_ISO" \
-    | jq .
+resp=$(curl -sS --max-time 35 -w '\n%{http_code}' \
+    "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=START_ISO&time_max=END_ISO")
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq .
+fi
 ```
 
 Parameters:
 - `time_min` - Start of range (ISO 8601, e.g., `2026-01-30T00:00:00-05:00`)
 - `time_max` - End of range (ISO 8601)
-- `max_results` - Optional, defaults to 50
+- `max_results` - Optional, defaults to `100` (verified against the deployed
+  `openapi.json`: the `max_results` query parameter on
+  `GET /calendars/{calendar_id}/events` has `"default": 100`)
 
 ### Search Events (for keyword/filter queries)
 
 ```bash
-curl -s -X POST "$CALENDAR_AGENT_URL/search" \
+resp=$(curl -sS --max-time 35 -X POST "$CALENDAR_AGENT_URL/search" -w '\n%{http_code}' \
     -H "Content-Type: application/json" \
     -d '{
         "calendar_id": "robergb@dm.org",
@@ -51,27 +67,51 @@ curl -s -X POST "$CALENDAR_AGENT_URL/search" \
             "time_max": "END_ISO",
             "max_results": 10
         }
-    }' \
-    | jq .
+    }')
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq .
+fi
 ```
 
 ### Ask About Specific Event
 
+`/ask-about` returns an `LLMResponse` — `{success, data, error}` — and the answer
+is at **`.data.answer`**, not `.answer`. (`data` is
+`{event_id, question, answer}`; a top-level `.answer` prints literal `null` on a
+fully successful call.)
+
 ```bash
-curl -s -X POST "$CALENDAR_AGENT_URL/ask-about" \
+resp=$(curl -sS --max-time 60 -X POST "$CALENDAR_AGENT_URL/ask-about" -w '\n%{http_code}' \
     -H "Content-Type: application/json" \
     -d '{
         "calendar_id": "robergb@dm.org",
         "event_id": "EVENT_ID",
         "question": "USER_QUESTION"
-    }' \
-    | jq -r '.answer'
+    }')
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq -r '.data.answer'
+fi
 ```
 
 ### Find Free Time
 
+`duration_minutes` is **required** on this endpoint (it is in the deployed
+`FindFreeTimeRequest.required` list) — omitting it is a `422`, not a default.
+
 ```bash
-curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
+resp=$(curl -sS --max-time 60 -X POST "$CALENDAR_AGENT_URL/find-free-time" -w '\n%{http_code}' \
     -H "Content-Type: application/json" \
     -d '{
         "calendar_id": "robergb@dm.org",
@@ -79,8 +119,16 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
         "time_max": "END_ISO",
         "duration_minutes": 30,
         "working_hours_only": true
-    }' \
-    | jq .
+    }')
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq '.data'
+fi
 ```
 
 ## Examples
@@ -99,7 +147,30 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 calendar-agent's HTTP status now agrees with the body instead of always being
 `200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
 or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
-LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
-and check it before reading the body — for a read, a non-200 means *the answer is
+LLM failure, `504` no answer in time. For a read, a non-200 means *the answer is
 missing*, not that the calendar is empty. Never present a failed read as "nothing
 scheduled".
+
+**Do not bolt `-w '\n%{http_code}'` onto a piped `curl ... | jq ...` command.** `jq`
+then reads the trailing status line as a second JSON document and dies on it —
+`jq: error (at <stdin>:1): Cannot index number with string "events"`, exit status 5,
+with whatever it managed to print from the real body left tangled up with the error.
+Verified live 2026-09-04 against the deployed agent. Capture the response into a
+variable, split off the status, and pipe only the body to `jq`:
+
+```bash
+resp=$(curl -sS --max-time 35 -w '\n%{http_code}' "$CALENDAR_AGENT_URL/health")
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq .
+fi
+```
+
+The commands under *Usage* above are already in this form — copy one and change the
+URL, the payload and the final `jq` filter. Any remaining `curl -s ... | jq ...`
+snippet in this file illustrates request shape only; do not run it as the real read.

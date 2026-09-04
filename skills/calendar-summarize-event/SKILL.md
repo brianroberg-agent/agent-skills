@@ -40,14 +40,22 @@ curl -s -X POST "$CALENDAR_AGENT_URL/search" \
 Use the event ID to get a summary:
 
 ```bash
-curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
+resp=$(curl -sS --max-time 60 -X POST "$CALENDAR_AGENT_URL/summarize" -w '\n%{http_code}' \
     -H "Content-Type: application/json" \
     -d '{
         "calendar_id": "robergb@dm.org",
         "event_id": "EVENT_ID",
         "format": "detailed"
-    }' \
-    | jq .
+    }')
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq -r '.data.summary'
+fi
 ```
 
 ## Request Fields
@@ -60,19 +68,22 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
 
 ## Response Format
 
+The envelope is `LLMResponse` — `{success, data, error}` — and the summary text is a
+**string at `.data.summary`**. There is no top-level `event`, and no
+`.summary.content` object:
+
 ```json
 {
   "success": true,
-  "event": {
-    "id": "abc123",
-    "summary": "Q1 Planning Meeting"
+  "data": {
+    "event_id": "abc123",
+    "summary": "This is a 2-hour planning meeting for Q1 objectives. Key participants include the leadership team. The agenda covers budget review, team goals, and resource allocation. Based on the description, you should prepare the Q4 metrics report before attending."
   },
-  "summary": {
-    "format": "detailed",
-    "content": "This is a 2-hour planning meeting for Q1 objectives. Key participants include the leadership team. The agenda covers budget review, team goals, and resource allocation. Based on the description, you should prepare the Q4 metrics report before attending."
-  }
+  "error": null
 }
 ```
+
+Read it with `jq -r '.data.summary'`. The requested `format` is not echoed back.
 
 ## Summary Formats
 
@@ -97,7 +108,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
         "event_id": "abc123",
         "format": "brief"
     }' \
-    | jq -r '.summary.content'
+    | jq -r '.data.summary'
 ```
 
 **Detailed summary with preparation notes:**
@@ -130,7 +141,30 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
 calendar-agent's HTTP status now agrees with the body instead of always being
 `200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
 or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
-LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
-and check it before reading the body — for a read, a non-200 means *the answer is
+LLM failure, `504` no answer in time. For a read, a non-200 means *the answer is
 missing*, not that the calendar is empty. Never present a failed read as "nothing
 scheduled".
+
+**Do not bolt `-w '\n%{http_code}'` onto a piped `curl ... | jq ...` command.** `jq`
+then reads the trailing status line as a second JSON document and dies on it —
+`jq: error (at <stdin>:1): Cannot index number with string "events"`, exit status 5,
+with whatever it managed to print from the real body left tangled up with the error.
+Verified live 2026-09-04 against the deployed agent. Capture the response into a
+variable, split off the status, and pipe only the body to `jq`:
+
+```bash
+resp=$(curl -sS --max-time 35 -w '\n%{http_code}' "$CALENDAR_AGENT_URL/health")
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq .
+fi
+```
+
+The commands under *Usage* above are already in this form — copy one and change the
+URL, the payload and the final `jq` filter. Any remaining `curl -s ... | jq ...`
+snippet in this file illustrates request shape only; do not run it as the real read.
