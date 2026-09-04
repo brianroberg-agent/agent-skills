@@ -18,49 +18,64 @@ Requires `CALENDAR_AGENT_URL` environment variable to be set.
 When this skill is invoked with a timeframe, run:
 
 ```bash
-curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
+resp=$(curl -sS --max-time 60 -X POST "$CALENDAR_AGENT_URL/find-free-time" -w '\n%{http_code}' \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "START_ISO",
         "time_max": "END_ISO",
         "duration_minutes": 30,
         "working_hours_only": true
-    }' \
-    | jq .
+    }')
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq '.data'
+fi
 ```
 
 ## Request Fields
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `calendar_id` | No | `primary` | Calendar to check |
+| `calendar_id` | Yes | - | Calendar to check. Name it explicitly (`robergb@dm.org`); `primary` resolves to whatever account the proxy is authenticated as |
 | `time_min` | Yes | - | Start of search range (ISO 8601) |
 | `time_max` | Yes | - | End of search range (ISO 8601) |
-| `duration_minutes` | No | `30` | Minimum slot duration needed |
+| `duration_minutes` | **Yes** | - | Minimum slot duration needed. **Required** — it is in `FindFreeTimeRequest.required` on the deployed spec (`[calendar_id, time_min, time_max, duration_minutes]`); omitting it returns `422`, it does not default to 30 |
 | `working_hours_only` | No | `true` | Only return 9am-5pm slots |
 
 ## Response Format
 
-Returns an array of available time slots:
+The envelope is `LLMResponse` — `{success, data, error}`. **There is no top-level
+`free_slots`**; everything is under `data`:
 
 ```json
 {
   "success": true,
-  "free_slots": [
-    {
-      "start": "2026-01-30T10:00:00-05:00",
-      "end": "2026-01-30T11:30:00-05:00",
-      "duration_minutes": 90
-    },
-    {
-      "start": "2026-01-30T14:00:00-05:00",
-      "end": "2026-01-30T17:00:00-05:00",
-      "duration_minutes": 180
-    }
-  ]
+  "data": {
+    "available_slots": [
+      {"start": "2026-01-30T10:00:00-05:00", "end": "2026-01-30T11:30:00-05:00", "duration_minutes": 90},
+      {"start": "2026-01-30T14:00:00-05:00", "end": "2026-01-30T17:00:00-05:00", "duration_minutes": 180}
+    ],
+    "suggestions": "Free-text recommendation of the best 2-3 slots, with reasoning.",
+    "duration_requested": 30
+  },
+  "error": null
 }
 ```
+
+`suggestions` is **prose, not a list**, and `available_slots` holds at most the top
+five slots. Read them with `jq '.data.available_slots'` and
+`jq -r '.data.suggestions'`.
+
+**One shape change to expect:** when no slot in the range is long enough, `data` is
+`{"suggestions": [], "reasoning": "No slots available with at least N minutes free."}`
+instead — `available_slots` is absent and `suggestions` is an empty array. Handle
+both, and note this is a *successful* `200`: it means "no room", not "read failed".
 
 ## Examples
 
@@ -69,7 +84,7 @@ Returns an array of available time slots:
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-31T00:00:00-05:00",
         "time_max": "2026-01-31T23:59:59-05:00",
         "duration_minutes": 30,
@@ -83,7 +98,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-02-02T00:00:00-05:00",
         "time_max": "2026-02-06T23:59:59-05:00",
         "duration_minutes": 60,
@@ -97,7 +112,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-31T12:00:00-05:00",
         "time_max": "2026-01-31T20:00:00-05:00",
         "duration_minutes": 30,
@@ -113,3 +128,36 @@ When user says "tomorrow", "next week", etc.:
 1. Calculate actual dates based on current date
 2. Use ISO 8601 format with timezone: `YYYY-MM-DDTHH:MM:SS-05:00`
 3. For full day, use `00:00:00` to `23:59:59`
+
+## Non-200 responses
+
+calendar-agent's HTTP status now agrees with the body instead of always being
+`200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
+or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
+LLM failure, `504` no answer in time. For a read, a non-200 means *the answer is
+missing*, not that the calendar is empty. Never present a failed read as "nothing
+scheduled".
+
+**Do not bolt `-w '\n%{http_code}'` onto a piped `curl ... | jq ...` command.** `jq`
+then reads the trailing status line as a second JSON document and dies on it —
+`jq: error (at <stdin>:1): Cannot index number with string "events"`, exit status 5,
+with whatever it managed to print from the real body left tangled up with the error.
+Verified live 2026-09-04 against the deployed agent. Capture the response into a
+variable, split off the status, and pipe only the body to `jq`:
+
+```bash
+resp=$(curl -sS --max-time 35 -w '\n%{http_code}' "$CALENDAR_AGENT_URL/health")
+rc=$?
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$rc" -ne 0 ] || [ "$code" != "200" ]; then
+    echo "READ FAILED (curl exit $rc, HTTP ${code:-none}) - the answer is missing, not empty"
+    printf '%s' "$body" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$body" | jq .
+fi
+```
+
+The commands under *Usage* above are already in this form — copy one and change the
+URL, the payload and the final `jq` filter. Any remaining `curl -s ... | jq ...`
+snippet in this file illustrates request shape only; do not run it as the real read.
