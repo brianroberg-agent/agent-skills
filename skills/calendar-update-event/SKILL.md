@@ -25,6 +25,14 @@ a retry enqueues a *second* approval request for the same operation. Give curl
 `--max-time 420` so it outlives the server's own budget instead of dying first
 with an ambiguous transport error.
 
+🚨 **You must also pass `timeout: 450000` on the Bash tool call that runs it.** The
+Bash tool's own timeout defaults to **120000 ms** (max 600000) — *shorter than the
+operator's approval window*. At the default the tool kills the call at two minutes,
+curl never prints its `%{http_code}`, and you are left in exactly the ambiguous
+"did it happen?" state this contract exists to remove, while the operator's approval
+lands at minute three and the update is applied anyway. `--max-time 420` without
+`timeout: 450000` buys nothing.
+
 **There are three outcomes, not two:** success, failure, and **unknown**. An update
 whose answer never arrived may still be applied minutes later when the operator
 approves it. Never report unknown as failure, and never issue a second write to
@@ -60,8 +68,17 @@ status table: it is the field the server computes, and the table is the
 client-side re-derivation of it. When it appears, `unknown` and `not_attempted`
 must never be reported as failure.
 
-A body without a boolean `success` key is not calendar-agent's answer at all
-(most likely a wrong `CALENDAR_AGENT_URL`). Treat it as unknown.
+**The status table decides first; the body's shape is only a fallback.** A `422` is
+a **definite failure**, not an unknown, even though its FastAPI body
+(`{"detail": [...]}`) carries no `success` key: the request was rejected by
+validation before it reached the calendar, nothing is outstanding, and the fix is
+to correct the payload and send it again. It is the most likely non-200 in
+practice — reporting it as "it may still have been applied" both misleads the user and
+blocks, under the sequencing invariant below, the retry that would actually fix it.
+
+Only for a status *not* in the table above does the body's shape matter: a response
+with no boolean `success` key and no recognised status is not calendar-agent's
+answer at all (most likely a wrong `CALENDAR_AGENT_URL`). Treat that as unknown.
 
 ## Sequencing invariant (binding)
 
@@ -105,6 +122,12 @@ curl -s --max-time 35 -X POST "$CALENDAR_AGENT_URL/search" \
 
 Extract the `id` field from the event you want to update.
 
+Both of these finding commands discard the HTTP status. If one prints nothing, that
+is **not** evidence the event is absent — a failed read looks identical to an empty
+result (`EventsListResponse` is `{"success": false, "events": [], "error": ...}`).
+Before concluding an event does not exist, re-run the read in the status-capturing
+form used in Step 3.
+
 ### Step 2: Update the event, capturing status and body
 
 Use `PATCH` to change only the fields that need to change:
@@ -134,14 +157,27 @@ means the change took effect.
 
 ### Step 3: Verify after an unknown outcome
 
+The read must carry its own status: `EventDetailResponse` is
+`{"success": false, "event": null, "error": "..."}` on failure, so a bare
+`curl -s ... | jq ...` cannot tell "unchanged" from "not read".
+
 ```bash
-curl -s --max-time 35 "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events/EVENT_ID" \
-    | jq '{success, summary: .event.summary, start: .event.start, end: .event.end, status: .event.status}'
+vresp=$(curl -sS --max-time 35 -w '\n%{http_code}' \
+    "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events/EVENT_ID")
+vrc=$?
+vcode="${vresp##*$'\n'}"
+vbody="${vresp%$'\n'*}"
+if [ "$vrc" -ne 0 ] || [ "$vcode" != "200" ]; then
+    echo "INCONCLUSIVE: could not read the event (curl exit $vrc, HTTP ${vcode:-none})"
+    printf '%s' "$vbody" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$vbody" | jq '{success, summary: .event.summary, start: .event.start, end: .event.end, status: .event.status}'
+fi
 ```
 
-Compare against what you intended. Report what you actually observed — "the change
-is present", "the event is unchanged", or "could not read the event" — not what you
-assume happened. An unchanged event after a `504` is still **unknown**, not failed:
+Compare against what you intended, and report only the branch you reached — "the
+change is present", "the event is unchanged", or "could not read the event" — not
+what you assume happened. An unchanged event after a `504` is still **unknown**, not failed:
 the operator may approve it later.
 
 ## Updatable fields
@@ -196,7 +232,9 @@ curl -sS --max-time 420 -w '\n%{http_code}' \
 ```
 
 In each example the trailing line of output is the HTTP status; read it, do not
-discard it. A discarded status is how a non-200 gets read as success.
+discard it. A discarded status is how a non-200 gets read as success. Each of these calls
+also needs `timeout: 450000` on the Bash tool call itself — the tool's 120000 ms
+default expires before the operator's approval window closes.
 
 ## Security notes
 

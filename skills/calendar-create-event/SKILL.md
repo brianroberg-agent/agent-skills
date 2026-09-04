@@ -25,6 +25,14 @@ a retry enqueues a *second* approval request and can produce two events. Give cu
 `--max-time 420` so it outlives the server's own budget instead of dying first
 with an ambiguous transport error.
 
+🚨 **You must also pass `timeout: 450000` on the Bash tool call that runs it.** The
+Bash tool's own timeout defaults to **120000 ms** (max 600000) — *shorter than the
+operator's approval window*. At the default the tool kills the call at two minutes,
+curl never prints its `%{http_code}`, and you are left in exactly the ambiguous
+"did it happen?" state this contract exists to remove, while the operator's approval
+lands at minute three and the event is created anyway. `--max-time 420` without
+`timeout: 450000` buys nothing.
+
 **There are three outcomes, not two:** success, failure, and **unknown**. A create
 whose answer never arrived may still be applied minutes later when the operator
 approves it. Never report unknown as failure, and never create a second event to
@@ -58,8 +66,17 @@ If a future calendar-agent adds `outcome` to this envelope, prefer it over the
 status table: it is the field the server computes, and the table is the
 client-side re-derivation of it.
 
-A body without a boolean `success` key is not calendar-agent's answer at all
-(most likely a wrong `CALENDAR_AGENT_URL`). Treat it as unknown.
+**The status table decides first; the body's shape is only a fallback.** A `422` is
+a **definite failure**, not an unknown, even though its FastAPI body
+(`{"detail": [...]}`) carries no `success` key: the request was rejected by
+validation before it reached the calendar, nothing is outstanding, and the fix is
+to correct the payload and send it again. It is the most likely non-200 in
+practice — reporting it as "it may still have been created" both misleads the user and
+blocks, under the sequencing invariant below, the retry that would actually fix it.
+
+Only for a status *not* in the table above does the body's shape matter: a response
+with no boolean `success` key and no recognised status is not calendar-agent's
+answer at all (most likely a wrong `CALENDAR_AGENT_URL`). Treat that as unknown.
 
 ## Sequencing invariant (binding)
 
@@ -109,15 +126,34 @@ means the event exists.
 
 ## Verifying after an unknown outcome
 
+**The read must carry its own status.** `EventsListResponse` is
+`{"success": false, "events": [], "error": "..."}` when the read fails, so a bare
+`curl -s ... | jq '.events[] | ...'` prints nothing both when the window is genuinely
+empty and when the read returned `502`. Those are opposite answers: "none present"
+invites a replacement event, "could not read" forbids one. Capture the status:
+
 ```bash
-curl -s --max-time 35 \
-    "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=START_ISO&time_max=END_ISO" \
-    | jq '.events[] | {id, summary, start, end}'
+vresp=$(curl -sS --max-time 35 -w '\n%{http_code}' \
+    "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=START_ISO&time_max=END_ISO")
+vrc=$?
+vcode="${vresp##*$'\n'}"
+vbody="${vresp%$'\n'*}"
+if [ "$vrc" -ne 0 ] || [ "$vcode" != "200" ]; then
+    echo "INCONCLUSIVE: could not read the calendar (curl exit $vrc, HTTP ${vcode:-none})"
+    printf '%s' "$vbody" | jq -r '.error // .' 2>/dev/null
+else
+    printf '%s' "$vbody" | jq '.events[] | {id, summary, start, end}'
+fi
 ```
 
 Match on summary and start time over a window that brackets the intended event.
-Report what you actually observed — "one event present", "none present", or "could
-not read the calendar" — not what you assume happened.
+Report what you actually observed, and only the branch you actually reached:
+
+- `200`, one matching event → **present**. Report the create as done.
+- `200`, no matching event → **none present**. The create is still `unknown` if it
+  timed out; the operator may approve it later. Do not create a replacement.
+- anything else (non-200, or curl failed) → **could not read**. Nothing is known.
+  Wait and re-read; do not create anything.
 
 ## Request fields
 
@@ -172,7 +208,9 @@ curl -sS --max-time 420 -w '\n%{http_code}' \
 ```
 
 In both examples the trailing line of output is the HTTP status; read it, do not
-discard it. A discarded status is how a non-200 gets read as success.
+discard it. A discarded status is how a non-200 gets read as success. Each of these calls
+also needs `timeout: 450000` on the Bash tool call itself — the tool's 120000 ms
+default expires before the operator's approval window closes.
 
 ## Parsing natural language
 

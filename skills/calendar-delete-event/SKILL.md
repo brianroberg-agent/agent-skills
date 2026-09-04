@@ -28,6 +28,14 @@ minutes is working normally, not hung.** Do not kill it, do not retry it (a retr
 enqueues a *second* approval request for the same operation), and do not report
 it as failed. Give curl `--max-time 420` so it outlives the server's own budget.
 
+🚨 **You must also pass `timeout: 450000` on the Bash tool call that runs it.** The
+Bash tool's own timeout defaults to **120000 ms** (max 600000) — *shorter than the
+operator's approval window*. At the default the tool kills the call at two minutes,
+curl never prints its `%{http_code}`, and you are left in exactly the ambiguous
+"did it happen?" state this contract exists to remove, while the operator's approval
+lands at minute three and the deletion goes through anyway. `--max-time 420` without
+`timeout: 450000` buys nothing.
+
 **2. There are three outcomes, not two.** Success, failure, and **unknown**. An
 unknown deletion may still be applied minutes later when the operator gets to it.
 Reporting unknown as "failed" is exactly what produced the 2026-08-07 duplicate-event
@@ -71,9 +79,18 @@ described to the user as a failure.
 | `504` | **Outcome unknown** — no answer in time, or the verifying re-read failed |
 | curl exit != 0 | **Outcome unknown** — transport timeout or connection failure |
 
-A body without a boolean `success` key is not calendar-agent's answer at all
-(most likely a wrong `CALENDAR_AGENT_URL` hitting a bare FastAPI 404). Its status
-code tells you nothing about the event: treat it as unknown.
+**Read `outcome` first, then the status table; the body's shape is only a
+fallback.** A `422` is a **definite failure**, not an unknown, even though its
+FastAPI body (`{"detail": [...]}`) carries no `success`/`outcome` key: the request
+was rejected by validation before it reached the calendar, nothing is outstanding,
+and the fix is to correct the payload and send it again. Reporting it as "the
+deletion may still be applied" both misleads the user and blocks, under the
+sequencing invariant below, the retry that would actually fix it.
+
+Only for a status *not* in the table above does the body's shape matter: a response
+with no boolean `success` key is then not calendar-agent's answer at all (most
+likely a wrong `CALENDAR_AGENT_URL` hitting a bare FastAPI 404, whose status code
+tells you nothing about the event). Treat that as unknown.
 
 ### If you use `POST /bulk-actions`
 
@@ -125,6 +142,12 @@ happens to be authenticated as, so it can silently address a different calendar
 than the one intended, and it is not the documented id for this deployment. Path
 segments must be URL-encoded, so `robergb@dm.org` becomes `robergb%40dm.org`
 inside a URL.
+
+Both of these finding commands discard the HTTP status. If one prints nothing, that
+is **not** evidence the event is absent — a failed read looks identical to an empty
+result (`EventsListResponse` is `{"success": false, "events": [], "error": ...}`).
+Before concluding an event does not exist, re-run the read in the status-capturing
+form used in Step 4.
 
 ### Step 2: Confirm the event details with the user
 
@@ -183,9 +206,11 @@ else
 fi
 ```
 
-- HTTP `404`/`410`, or HTTP `200` with `.event.status == "cancelled"` → **gone**.
+- HTTP `404`, or HTTP `200` with `.event.status == "cancelled"` → **gone**.
   Google keeps a deleted event readable as `cancelled` for a while before it 404s,
-  so both count as gone.
+  so both count as gone. (calendar-agent's `error_status_code()` emits only 403,
+  404, 500, 502 and 504 — a `410` from this server would itself be the anomaly, so
+  do not treat one as evidence of anything.)
 - HTTP `200` with any other `.event.status` → **still present**. That is a failure
   only if nothing is outstanding; if the delete came back `unknown`, it is still
   unknown.
