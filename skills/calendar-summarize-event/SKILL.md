@@ -23,7 +23,7 @@ First, identify the event to summarize:
 
 **List upcoming events:**
 ```bash
-curl -s "$CALENDAR_AGENT_URL/calendars/primary/events?time_min=START_ISO&time_max=END_ISO" \
+curl -s "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=START_ISO&time_max=END_ISO" \
     | jq '.events[] | {id, summary, start}'
 ```
 
@@ -31,7 +31,7 @@ curl -s "$CALENDAR_AGENT_URL/calendars/primary/events?time_min=START_ISO&time_ma
 ```bash
 curl -s -X POST "$CALENDAR_AGENT_URL/search" \
     -H "Content-Type: application/json" \
-    -d '{"query": "SEARCH_TERM"}' \
+    -d '{"calendar_id": "robergb@dm.org", "filters": {"query": "SEARCH_TERM"}}' \
     | jq '.events[] | {id, summary, start}'
 ```
 
@@ -43,6 +43,7 @@ Use the event ID to get a summary:
 curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
     -H "Content-Type: application/json" \
     -d '{
+        "calendar_id": "robergb@dm.org",
         "event_id": "EVENT_ID",
         "format": "detailed"
     }' \
@@ -53,6 +54,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `calendar_id` | Yes | - | Calendar holding the event (`robergb@dm.org`) |
 | `event_id` | Yes | - | The event ID to summarize |
 | `format` | No | `brief` | Summary format: `brief` or `detailed` |
 
@@ -84,13 +86,14 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
 **Brief summary of next meeting:**
 ```bash
 # Find next meeting
-curl -s "$CALENDAR_AGENT_URL/calendars/primary/events?time_min=$(date -Iseconds)&max_results=1" \
+curl -s "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=$(date -Iseconds)&max_results=1" \
     | jq '.events[0].id'
 
 # Get brief summary
 curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
     -H "Content-Type: application/json" \
     -d '{
+        "calendar_id": "robergb@dm.org",
         "event_id": "abc123",
         "format": "brief"
     }' \
@@ -102,6 +105,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
 curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
     -H "Content-Type: application/json" \
     -d '{
+        "calendar_id": "robergb@dm.org",
         "event_id": "abc123",
         "format": "detailed"
     }' \
@@ -120,3 +124,13 @@ curl -s -X POST "$CALENDAR_AGENT_URL/summarize" \
 - Use `format: "detailed"` when you need preparation information
 - Combine with `/search-events` to find specific meetings first
 - The summary analyzes event description, attendees, and context
+
+## Non-200 responses
+
+calendar-agent's HTTP status now agrees with the body instead of always being
+`200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
+or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
+LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
+and check it before reading the body — for a read, a non-200 means *the answer is
+missing*, not that the calendar is empty. Never present a failed read as "nothing
+scheduled".

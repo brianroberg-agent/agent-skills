@@ -21,7 +21,7 @@ When this skill is invoked with a timeframe, run:
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "START_ISO",
         "time_max": "END_ISO",
         "duration_minutes": 30,
@@ -34,7 +34,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `calendar_id` | No | `primary` | Calendar to check |
+| `calendar_id` | Yes | - | Calendar to check. Name it explicitly (`robergb@dm.org`); `primary` resolves to whatever account the proxy is authenticated as |
 | `time_min` | Yes | - | Start of search range (ISO 8601) |
 | `time_max` | Yes | - | End of search range (ISO 8601) |
 | `duration_minutes` | No | `30` | Minimum slot duration needed |
@@ -69,7 +69,7 @@ Returns an array of available time slots:
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-31T00:00:00-05:00",
         "time_max": "2026-01-31T23:59:59-05:00",
         "duration_minutes": 30,
@@ -83,7 +83,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-02-02T00:00:00-05:00",
         "time_max": "2026-02-06T23:59:59-05:00",
         "duration_minutes": 60,
@@ -97,7 +97,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-31T12:00:00-05:00",
         "time_max": "2026-01-31T20:00:00-05:00",
         "duration_minutes": 30,
@@ -113,3 +113,13 @@ When user says "tomorrow", "next week", etc.:
 1. Calculate actual dates based on current date
 2. Use ISO 8601 format with timezone: `YYYY-MM-DDTHH:MM:SS-05:00`
 3. For full day, use `00:00:00` to `23:59:59`
+
+## Non-200 responses
+
+calendar-agent's HTTP status now agrees with the body instead of always being
+`200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
+or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
+LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
+and check it before reading the body — for a read, a non-200 means *the answer is
+missing*, not that the calendar is empty. Never present a failed read as "nothing
+scheduled".

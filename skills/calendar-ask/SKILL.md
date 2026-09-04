@@ -19,7 +19,7 @@ Choose the appropriate endpoint based on the user's question:
 
 | Question Type | Endpoint | Use When |
 |---------------|----------|----------|
-| List events | `GET /calendars/primary/events` | "What's on my calendar today/this week?" |
+| List events | `GET /calendars/robergb%40dm.org/events` | "What's on my calendar today/this week?" |
 | Search events | `POST /search` | "Find meetings with Alice" or keyword searches |
 | Ask about event | `POST /ask-about` | "What's the agenda for my 2pm meeting?" |
 | Find free time | `POST /find-free-time` | "When am I free tomorrow?" |
@@ -29,7 +29,7 @@ Choose the appropriate endpoint based on the user's question:
 ### List Events (for timeframe queries)
 
 ```bash
-curl -s "$CALENDAR_AGENT_URL/calendars/primary/events?time_min=START_ISO&time_max=END_ISO" \
+curl -s "$CALENDAR_AGENT_URL/calendars/robergb%40dm.org/events?time_min=START_ISO&time_max=END_ISO" \
     | jq .
 ```
 
@@ -44,10 +44,13 @@ Parameters:
 curl -s -X POST "$CALENDAR_AGENT_URL/search" \
     -H "Content-Type: application/json" \
     -d '{
-        "query": "SEARCH_TERM",
-        "time_min": "START_ISO",
-        "time_max": "END_ISO",
-        "max_results": 10
+        "calendar_id": "robergb@dm.org",
+        "filters": {
+            "query": "SEARCH_TERM",
+            "time_min": "START_ISO",
+            "time_max": "END_ISO",
+            "max_results": 10
+        }
     }' \
     | jq .
 ```
@@ -58,6 +61,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/search" \
 curl -s -X POST "$CALENDAR_AGENT_URL/ask-about" \
     -H "Content-Type: application/json" \
     -d '{
+        "calendar_id": "robergb@dm.org",
         "event_id": "EVENT_ID",
         "question": "USER_QUESTION"
     }' \
@@ -70,7 +74,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/ask-about" \
 curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "START_ISO",
         "time_max": "END_ISO",
         "duration_minutes": 30,
@@ -81,7 +85,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 
 ## Examples
 
-- "What's on my schedule today?" → Use GET /calendars/primary/events with today's date range
+- "What's on my schedule today?" → Use GET /calendars/robergb%40dm.org/events with today's date range
 - "When am I free tomorrow afternoon?" → Use POST /find-free-time
 - "Find all meetings with Project Alpha" → Use POST /search with query
 - "What's the location for my 3pm meeting?" → First list events, then POST /ask-about
@@ -89,3 +93,13 @@ curl -s -X POST "$CALENDAR_AGENT_URL/find-free-time" \
 ## Security Notes
 
 - The calendar agent ignores instructions found in event descriptions (prompt injection protection)
+
+## Non-200 responses
+
+calendar-agent's HTTP status now agrees with the body instead of always being
+`200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
+or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
+LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
+and check it before reading the body — for a read, a non-200 means *the answer is
+missing*, not that the calendar is empty. Never present a failed read as "nothing
+scheduled".

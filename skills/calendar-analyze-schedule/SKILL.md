@@ -21,7 +21,7 @@ When this skill is invoked, run:
 curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "START_ISO",
         "time_max": "END_ISO",
         "analysis_type": "ANALYSIS_TYPE"
@@ -42,7 +42,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `calendar_id` | No | `primary` | Calendar to analyze |
+| `calendar_id` | Yes | - | Calendar to analyze. Name it explicitly (`robergb@dm.org`); `primary` resolves to whatever account the proxy is authenticated as |
 | `time_min` | Yes | - | Start of analysis range (ISO 8601) |
 | `time_max` | Yes | - | End of analysis range (ISO 8601) |
 | `analysis_type` | No | `overview` | Type of analysis to perform |
@@ -54,7 +54,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
 curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-27T00:00:00-05:00",
         "time_max": "2026-01-31T23:59:59-05:00",
         "analysis_type": "overview"
@@ -67,7 +67,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
 curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-01T00:00:00-05:00",
         "time_max": "2026-01-31T23:59:59-05:00",
         "analysis_type": "workload"
@@ -80,7 +80,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
 curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-27T00:00:00-05:00",
         "time_max": "2026-02-07T23:59:59-05:00",
         "analysis_type": "conflicts"
@@ -93,7 +93,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
 curl -s -X POST "$CALENDAR_AGENT_URL/analyze-schedule" \
     -H "Content-Type: application/json" \
     -d '{
-        "calendar_id": "primary",
+        "calendar_id": "robergb@dm.org",
         "time_min": "2026-01-01T00:00:00-05:00",
         "time_max": "2026-01-31T23:59:59-05:00",
         "analysis_type": "patterns"
@@ -134,3 +134,13 @@ The response includes the analysis results:
 - "Do I have any scheduling conflicts?"
 - "What are my meeting patterns this month?"
 - "Am I spending too much time in meetings?"
+
+## Non-200 responses
+
+calendar-agent's HTTP status now agrees with the body instead of always being
+`200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
+or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
+LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
+and check it before reading the body — for a read, a non-200 means *the answer is
+missing*, not that the calendar is empty. Never present a failed read as "nothing
+scheduled".

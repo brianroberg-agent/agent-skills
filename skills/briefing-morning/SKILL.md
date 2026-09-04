@@ -29,7 +29,7 @@ curl -s -X POST "$CALENDAR_AGENT_URL/prepare-briefing" \
     -H "Content-Type: application/json" \
     -d '{
         "briefing_type": "daily",
-        "calendar_id": "primary"
+        "calendar_id": "robergb@dm.org"
     }' \
     | jq -r 'if .success then .briefing else "Calendar error: " + .error end'
 ```
@@ -100,3 +100,13 @@ After presenting the briefing, the user might ask:
 - "Process my inbox" (→ use `gtd-process-inbox` skill)
 - "Show me those donor tasks" (→ use `gtd-donor-tasks` skill)
 - "What's overdue?" (→ use `gtd-review-actions` skill)
+
+## Non-200 responses
+
+calendar-agent's HTTP status now agrees with the body instead of always being
+`200`: `403` blocked by policy or rejected by the operator, `404` no such calendar
+or event, `422` malformed request, `500` unexpected fault, `502` upstream proxy or
+LLM failure, `504` no answer in time. Capture the status (`curl -sS -w '\n%{http_code}'`)
+and check it before reading the body — for a read, a non-200 means *the answer is
+missing*, not that the calendar is empty. Never present a failed read as "nothing
+scheduled".
